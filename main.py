@@ -1,8 +1,19 @@
 from fastapi import FastAPI, Request
 import requests
 from fastapi.responses import Response
+from fastapi.middleware.cors import CORSMiddleware
 
 app = FastAPI()
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Or specify your domain for security
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
 
 @app.post("/process-image")
 async def process_image(request: Request):
