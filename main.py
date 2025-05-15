@@ -107,7 +107,10 @@ def process_to_svg(image_bytes):
         x, y, w, h = obj['bounding_box']
         cx = x + w / 2
         cy = y + h / 2
-        dist = hypot(cx, cy)
+        ref_x = data['width'] * 0.25
+        ref_y = 0
+        dist = hypot(cx - ref_x, cy - ref_y)
+
         ranked_objects.append((dist, obj))
 
     ranked_objects.sort(key=lambda t: t[0])  # ascending by distance
