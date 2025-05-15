@@ -7,6 +7,7 @@ import numpy as np
 from PIL import Image
 from io import BytesIO
 from xml.dom.minidom import Document
+import pyclipper
 
 app = FastAPI()
 
@@ -89,20 +90,14 @@ def process_to_svg(image_bytes):
     data = extract_objects_from_bytes(image_bytes)
 
     def offset_inward(coords, offset_distance=5):
-        coords = np.array(coords, dtype=np.float32)
-        coords = np.vstack([coords, coords[0]])  # ensure closed loop
-
-        vectors = np.roll(coords, -1, axis=0) - np.roll(coords, 1, axis=0)
-        normals = np.zeros_like(vectors)
-        normals[:, 0] = -vectors[:, 1]
-        normals[:, 1] = vectors[:, 0]
-
-        norms = np.linalg.norm(normals, axis=1, keepdims=True)
-        norms[norms == 0] = 1
-        normals /= norms
-
-        inward_coords = coords[:-1] + offset_distance * normals[:-1]
-        return inward_coords.tolist()
+        scale = 1 << 31
+        polygon = [(int(x * scale), int(y * scale)) for x, y in coords]
+        pc = pyclipper.PyclipperOffset()
+        pc.AddPath(polygon, pyclipper.JT_MITER, pyclipper.ET_CLOSEDPOLYGON)
+        offset = pc.Execute(-offset_distance * scale)
+        if offset:
+            return [(x / scale, y / scale) for x, y in offset[0]]
+        return []
 
     doc = Document()
     svg = doc.createElement('svg')
