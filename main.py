@@ -50,7 +50,7 @@ def extract_objects_from_bytes(image_bytes):
     image_np = np.array(white_bg)
     image_cv = cv2.cvtColor(image_np, cv2.COLOR_RGB2BGR)
     gray = cv2.cvtColor(image_cv, cv2.COLOR_BGR2GRAY)
-    _, thresh = cv2.threshold(gray, 127, 255, cv2.THRESH_BINARY_INV)
+    _, thresh = cv2.threshold(gray, 127, 255, cv2.THRESH_BINARY)
     cleaned = remove_small_objects(thresh, min_area=500)
     contours, _ = cv2.findContours(cleaned, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     objects = []
