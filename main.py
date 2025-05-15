@@ -8,6 +8,7 @@ from PIL import Image
 from io import BytesIO
 from xml.dom.minidom import Document
 from skimage import measure
+from math import hypot
 
 app = FastAPI()
 
@@ -77,7 +78,7 @@ def extract_objects_from_bytes(image_bytes):
         "height": image_cv.shape[0]
     }
 
-def generate_inner_contour(image_shape, contour, offset_distance=5):
+def generate_inner_contour(image_shape, contour, offset_distance=8):
     mask = np.zeros(image_shape, dtype=np.uint8)
     cv2.drawContours(mask, [contour], -1, 255, thickness=cv2.FILLED)
 
@@ -100,21 +101,33 @@ def process_to_svg(image_bytes):
     svg.setAttribute('xmlns', "http://www.w3.org/2000/svg")
     doc.appendChild(svg)
 
+    # Compute distance from center to (0, 0) for sorting
+    ranked_objects = []
     for obj in data['objects']:
+        x, y, w, h = obj['bounding_box']
+        cx = x + w / 2
+        cy = y + h / 2
+        dist = hypot(cx, cy)
+        ranked_objects.append((dist, obj))
+
+    ranked_objects.sort(key=lambda t: t[0])  # ascending by distance
+
+    for rank, (_, obj) in enumerate(ranked_objects):
         border_points = obj['border_points']
         if not border_points:
             continue
 
-        # --- Outer BLACK polyline from original points (unchanged) ---
+        # Outer black polyline
         black_str = " ".join(f"{x},{y}" for (x, y) in border_points)
         black_polyline = doc.createElement('polyline')
         black_polyline.setAttribute('points', black_str)
         black_polyline.setAttribute('fill', 'none')
         black_polyline.setAttribute('stroke', 'black')
         black_polyline.setAttribute('stroke-width', '1')
+        black_polyline.setAttribute('class', f'rank_{rank}')
         svg.appendChild(black_polyline)
 
-        # --- Inner RED polyline from distance transform ---
+        # Inner red polyline (distance transform)
         mask_shape = (data['height'], data['width'])
         red_points = generate_inner_contour(mask_shape, obj['mask'], offset_distance=8)
         if not red_points:
@@ -125,6 +138,7 @@ def process_to_svg(image_bytes):
         red_polyline.setAttribute('fill', 'none')
         red_polyline.setAttribute('stroke', 'red')
         red_polyline.setAttribute('stroke-width', '1')
+        red_polyline.setAttribute('class', f'rank_{rank}')
         svg.appendChild(red_polyline)
 
     return doc.toxml()
