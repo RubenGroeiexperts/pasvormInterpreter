@@ -41,7 +41,16 @@ def extract_border_points(contour, min_area_threshold=500):
     area = cv2.contourArea(contour)
     if area < min_area_threshold:
         return []
-    return [(int(point[0][0]), int(point[0][1])) for point in contour]
+    border_points = [(int(point[0][0]), int(point[0][1])) for point in contour]
+    num_points = len(border_points)
+    if num_points > 300:
+        indices = np.linspace(0, num_points - 1, 300, dtype=int)
+        border_points = [border_points[i] for i in indices]
+    elif num_points < 300 and num_points > 0:
+        multiplier = 300 // num_points
+        extra = 300 % num_points
+        border_points = border_points * multiplier + border_points[:extra]
+    return border_points
 
 def extract_objects_from_bytes(image_bytes):
     image = Image.open(BytesIO(image_bytes)).convert("RGBA")
@@ -65,8 +74,7 @@ def extract_objects_from_bytes(image_bytes):
     return {
         "objects": objects,
         "width": image_cv.shape[1],
-        "height": image_cv.shape[0],
-        "mask_image": cleaned
+        "height": image_cv.shape[0]
     }
 
 def generate_inner_contour(image_shape, contour, offset_distance=5):
@@ -93,31 +101,30 @@ def process_to_svg(image_bytes):
     doc.appendChild(svg)
 
     for obj in data['objects']:
-        points = obj['border_points']
-        if not points:
+        border_points = obj['border_points']
+        if not border_points:
             continue
 
-        # Outer black polyline
-        points_str = " ".join(f"{x},{y}" for (x, y) in points)
-        polyline = doc.createElement('polyline')
-        polyline.setAttribute('points', points_str)
-        polyline.setAttribute('fill', 'none')
-        polyline.setAttribute('stroke', 'black')
-        polyline.setAttribute('stroke-width', '1')
-        svg.appendChild(polyline)
+        # --- Outer BLACK polyline from original points (unchanged) ---
+        black_str = " ".join(f"{x},{y}" for (x, y) in border_points)
+        black_polyline = doc.createElement('polyline')
+        black_polyline.setAttribute('points', black_str)
+        black_polyline.setAttribute('fill', 'none')
+        black_polyline.setAttribute('stroke', 'black')
+        black_polyline.setAttribute('stroke-width', '1')
+        svg.appendChild(black_polyline)
 
-        # Inner red polyline
+        # --- Inner RED polyline from distance transform ---
         mask_shape = (data['height'], data['width'])
-        inner = generate_inner_contour(mask_shape, obj['mask'], offset_distance=5)
-        if not inner:
+        red_points = generate_inner_contour(mask_shape, obj['mask'], offset_distance=5)
+        if not red_points:
             continue
-        shrink_points_str = " ".join(f"{x},{y}" for (x, y) in inner)
-
-        shrink_polyline = doc.createElement('polyline')
-        shrink_polyline.setAttribute('points', shrink_points_str)
-        shrink_polyline.setAttribute('fill', 'none')
-        shrink_polyline.setAttribute('stroke', 'red')
-        shrink_polyline.setAttribute('stroke-width', '1')
-        svg.appendChild(shrink_polyline)
+        red_str = " ".join(f"{x},{y}" for (x, y) in red_points)
+        red_polyline = doc.createElement('polyline')
+        red_polyline.setAttribute('points', red_str)
+        red_polyline.setAttribute('fill', 'none')
+        red_polyline.setAttribute('stroke', 'red')
+        red_polyline.setAttribute('stroke-width', '1')
+        svg.appendChild(red_polyline)
 
     return doc.toxml()
