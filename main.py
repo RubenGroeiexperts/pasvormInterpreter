@@ -28,6 +28,15 @@ async def process_image(request: Request):
 
     return Response(content=svg_data, media_type="image/svg+xml")
 
+def smooth_contour(coords, k=5):
+    coords = np.array(coords, dtype=np.float32)
+    coords = np.vstack([coords[-k:], coords, coords[:k]])
+    kernel = np.ones((2 * k + 1, 1)) / (2 * k + 1)
+    smoothed = np.convolve(coords[:, 0], kernel.ravel(), mode='valid'), \
+               np.convolve(coords[:, 1], kernel.ravel(), mode='valid')
+    return np.vstack(smoothed).T.tolist()
+
+
 def remove_small_objects(image, min_area=500):
     contours, _ = cv2.findContours(image, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     mask = np.zeros_like(image)
@@ -117,7 +126,9 @@ def process_to_svg(image_bytes):
         svg.appendChild(polyline)
 
         # Uniform inward offset for inner border
-        shrunken_global = offset_inward(points, offset_distance=-5)
+        smoothed = smooth_contour(points, k=4)
+        shrunken_global = offset_inward(smoothed, offset_distance=-5)
+
         shrink_points_str = " ".join(f"{x:.2f},{y:.2f}" for (x, y) in shrunken_global)
 
         shrink_polyline = doc.createElement('polyline')
