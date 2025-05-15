@@ -145,7 +145,7 @@ def process_to_svg(image_bytes):
         svg.appendChild(red_polyline)
 
         if rank == 0:
-            shifts = [(15, 15, "rank_0_a"), (30, 30, "rank_0_b")]
+            shifts = [(-15, -15, "rank_0_a"), (-30, -30, "rank_0_b")]
             for dx, dy, label in shifts:
                 # Shift black polyline
                 shifted_black = [(x + dx, y + dy) for (x, y) in border_points]
