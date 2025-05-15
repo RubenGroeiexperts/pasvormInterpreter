@@ -116,7 +116,7 @@ def process_to_svg(image_bytes):
 
         # --- Inner RED polyline from distance transform ---
         mask_shape = (data['height'], data['width'])
-        red_points = generate_inner_contour(mask_shape, obj['mask'], offset_distance=5)
+        red_points = generate_inner_contour(mask_shape, obj['mask'], offset_distance=8)
         if not red_points:
             continue
         red_str = " ".join(f"{x},{y}" for (x, y) in red_points)
