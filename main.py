@@ -79,12 +79,21 @@ def extract_objects_from_bytes(image_bytes):
 def process_to_svg(image_bytes):
     data = extract_objects_from_bytes(image_bytes)
 
-    def shrink_and_reposition(coords):
-        max_x = max(x for x, y in coords)
-        max_y = max(y for x, y in coords)
-        coordinates2 = [[x * ((max_x - 20) / max_x) + 10,
-                        y * ((max_y - 20) / max_y) + 10] for x, y in coords]
-        return coordinates2
+    def offset_inward(coords, offset_distance=5):
+        coords = np.array(coords, dtype=np.float32)
+        coords = np.vstack([coords, coords[0]])  # ensure closed loop
+
+        vectors = np.roll(coords, -1, axis=0) - np.roll(coords, 1, axis=0)
+        normals = np.zeros_like(vectors)
+        normals[:, 0] = -vectors[:, 1]
+        normals[:, 1] = vectors[:, 0]
+
+        norms = np.linalg.norm(normals, axis=1, keepdims=True)
+        norms[norms == 0] = 1
+        normals /= norms
+
+        inward_coords = coords[:-1] + offset_distance * normals[:-1]
+        return inward_coords.tolist()
 
     doc = Document()
     svg = doc.createElement('svg')
@@ -107,12 +116,9 @@ def process_to_svg(image_bytes):
         polyline.setAttribute('stroke-width', '1')
         svg.appendChild(polyline)
 
-        # Shrinked inner shape
-        x0, y0, w, h = obj['bounding_box']
-        local_coords = [[x - x0, y - y0] for (x, y) in points]
-        shrunken_local = shrink_and_reposition(local_coords)
-        shrunken_global = [[x + x0, y + y0] for (x, y) in shrunken_local]
-        shrink_points_str = " ".join(f"{x},{y}" for (x, y) in shrunken_global)
+        # Uniform inward offset for inner border
+        shrunken_global = offset_inward(points, offset_distance=-5)
+        shrink_points_str = " ".join(f"{x:.2f},{y:.2f}" for (x, y) in shrunken_global)
 
         shrink_polyline = doc.createElement('polyline')
         shrink_polyline.setAttribute('points', shrink_points_str)
