@@ -7,7 +7,7 @@ import numpy as np
 from PIL import Image
 from io import BytesIO
 from xml.dom.minidom import Document
-import pyclipper
+from skimage import measure
 
 app = FastAPI()
 
@@ -29,15 +29,6 @@ async def process_image(request: Request):
 
     return Response(content=svg_data, media_type="image/svg+xml")
 
-def smooth_contour(coords, k=5):
-    coords = np.array(coords, dtype=np.float32)
-    coords = np.vstack([coords[-k:], coords, coords[:k]])
-    kernel = np.ones((2 * k + 1, 1)) / (2 * k + 1)
-    smoothed = np.convolve(coords[:, 0], kernel.ravel(), mode='valid'), \
-               np.convolve(coords[:, 1], kernel.ravel(), mode='valid')
-    return np.vstack(smoothed).T.tolist()
-
-
 def remove_small_objects(image, min_area=500):
     contours, _ = cv2.findContours(image, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     mask = np.zeros_like(image)
@@ -50,16 +41,7 @@ def extract_border_points(contour, min_area_threshold=500):
     area = cv2.contourArea(contour)
     if area < min_area_threshold:
         return []
-    border_points = [(int(point[0][0]), int(point[0][1])) for point in contour]
-    num_points = len(border_points)
-    if num_points > 300:
-        indices = np.linspace(0, num_points - 1, 300, dtype=int)
-        border_points = [border_points[i] for i in indices]
-    elif num_points < 300 and num_points > 0:
-        multiplier = 300 // num_points
-        extra = 300 % num_points
-        border_points = border_points * multiplier + border_points[:extra]
-    return border_points
+    return [(int(point[0][0]), int(point[0][1])) for point in contour]
 
 def extract_objects_from_bytes(image_bytes):
     image = Image.open(BytesIO(image_bytes)).convert("RGBA")
@@ -83,21 +65,26 @@ def extract_objects_from_bytes(image_bytes):
     return {
         "objects": objects,
         "width": image_cv.shape[1],
-        "height": image_cv.shape[0]
+        "height": image_cv.shape[0],
+        "mask_image": cleaned
     }
+
+def generate_inner_contour(image_shape, contour, offset_distance=5):
+    mask = np.zeros(image_shape, dtype=np.uint8)
+    cv2.drawContours(mask, [contour], -1, 255, thickness=cv2.FILLED)
+
+    dist_transform = cv2.distanceTransform(mask, cv2.DIST_L2, 5)
+    contours = measure.find_contours(dist_transform, level=offset_distance)
+
+    if not contours:
+        return []
+
+    # Find largest contour (most likely the correct inner one)
+    best_contour = max(contours, key=len)
+    return [(int(y), int(x)) for x, y in best_contour]
 
 def process_to_svg(image_bytes):
     data = extract_objects_from_bytes(image_bytes)
-
-    def offset_inward(coords, offset_distance=5):
-        scale = 1 << 31
-        polygon = [(int(x * scale), int(y * scale)) for x, y in coords]
-        pc = pyclipper.PyclipperOffset()
-        pc.AddPath(polygon, pyclipper.JT_MITER, pyclipper.ET_CLOSEDPOLYGON)
-        offset = pc.Execute(-offset_distance * scale)
-        if offset:
-            return [(x / scale, y / scale) for x, y in offset[0]]
-        return []
 
     doc = Document()
     svg = doc.createElement('svg')
@@ -111,7 +98,7 @@ def process_to_svg(image_bytes):
         if not points:
             continue
 
-        # Outer polyline
+        # Outer black polyline
         points_str = " ".join(f"{x},{y}" for (x, y) in points)
         polyline = doc.createElement('polyline')
         polyline.setAttribute('points', points_str)
@@ -120,11 +107,12 @@ def process_to_svg(image_bytes):
         polyline.setAttribute('stroke-width', '1')
         svg.appendChild(polyline)
 
-        # Uniform inward offset for inner border
-        smoothed = smooth_contour(points, k=4)
-        shrunken_global = offset_inward(smoothed, offset_distance=-5)
-
-        shrink_points_str = " ".join(f"{x:.2f},{y:.2f}" for (x, y) in shrunken_global)
+        # Inner red polyline
+        mask_shape = (data['height'], data['width'])
+        inner = generate_inner_contour(mask_shape, obj['mask'], offset_distance=5)
+        if not inner:
+            continue
+        shrink_points_str = " ".join(f"{x},{y}" for (x, y) in inner)
 
         shrink_polyline = doc.createElement('polyline')
         shrink_polyline.setAttribute('points', shrink_points_str)
