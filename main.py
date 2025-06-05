@@ -76,7 +76,7 @@ def extract_objects_from_bytes(image_bytes):
         "objects": objects,
         "width": image_cv.shape[1],
         "height": image_cv.shape[0],
-        "image_cv": image_cv
+        "original_image": gray
     }
 
 def generate_inner_contour(image_shape, contour, offset_distance=8):
@@ -92,20 +92,24 @@ def generate_inner_contour(image_shape, contour, offset_distance=8):
     best_contour = max(contours, key=len)
     return [(int(y), int(x)) for x, y in best_contour]
 
-def extract_largest_inner_contour(full_shape, outer_mask):
-    mask = np.zeros(full_shape, dtype=np.uint8)
-    cv2.drawContours(mask, [outer_mask], -1, 255, thickness=cv2.FILLED)
+def process_rank_0_object(data, rank_0_obj):
+    x, y, w, h = rank_0_obj['bounding_box']
+    roi = data['original_image'][y:y+h, x:x+w]
 
-    x, y, w, h = cv2.boundingRect(outer_mask)
-    roi = mask[y:y+h, x:x+w]
-    inverted = cv2.bitwise_not(roi)
+    mask = np.zeros_like(roi)
+    cv2.drawContours(mask, [rank_0_obj['mask'] - [x, y]], -1, 255, thickness=cv2.FILLED)
+    roi_masked = cv2.bitwise_and(roi, roi, mask=mask)
 
-    contours, _ = cv2.findContours(inverted, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    if not contours:
+    roi_inverted = cv2.bitwise_not(roi_masked)
+    _, binary_inv = cv2.threshold(roi_inverted, 127, 255, cv2.THRESH_BINARY)
+    contours_inv, _ = cv2.findContours(binary_inv, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+    if not contours_inv:
         return []
 
-    largest = max(contours, key=cv2.contourArea)
-    return [(int(pt[0][0] + x), int(pt[0][1] + y)) for pt in largest]
+    largest = max(contours_inv, key=cv2.contourArea)
+    border_points = [(int(pt[0][0] + x), int(pt[0][1] + y)) for pt in largest]
+    return border_points
 
 def process_to_svg(image_bytes):
     data = extract_objects_from_bytes(image_bytes)
@@ -182,17 +186,17 @@ def process_to_svg(image_bytes):
                 svg.appendChild(polyline_r)
                 all_points.extend(shifted_red)
 
-            # Find and draw inner green border
-            green_points = extract_largest_inner_contour(mask_shape, obj['mask'])
+            # Green outline of largest object inside bounding box
+            green_points = process_rank_0_object(data, obj)
             if green_points:
                 green_str = " ".join(f"{x},{y}" for (x, y) in green_points)
-                polyline_g = doc.createElement('polyline')
-                polyline_g.setAttribute('points', green_str)
-                polyline_g.setAttribute('fill', 'none')
-                polyline_g.setAttribute('stroke', 'green')
-                polyline_g.setAttribute('stroke-width', '1')
-                polyline_g.setAttribute('class', 'rank_0_inner')
-                svg.appendChild(polyline_g)
+                green_polyline = doc.createElement('polyline')
+                green_polyline.setAttribute('points', green_str)
+                green_polyline.setAttribute('fill', 'none')
+                green_polyline.setAttribute('stroke', 'green')
+                green_polyline.setAttribute('stroke-width', '1')
+                green_polyline.setAttribute('class', 'rank_0_inner')
+                svg.appendChild(green_polyline)
                 all_points.extend(green_points)
 
         all_points.extend(border_points)
