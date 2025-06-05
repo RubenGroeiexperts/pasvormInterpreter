@@ -92,26 +92,6 @@ def generate_inner_contour(image_shape, contour, offset_distance=8):
     best_contour = max(contours, key=len)
     return [(int(y), int(x)) for x, y in best_contour]
 
-def get_largest_inner_object(parent_contour, gray_image, min_area):
-    mask = np.zeros_like(gray_image)
-    cv2.drawContours(mask, [parent_contour], -1, 255, thickness=cv2.FILLED)
-
-    masked_gray = cv2.bitwise_and(gray_image, mask)
-    _, thresh = cv2.threshold(masked_gray, 127, 255, cv2.THRESH_BINARY_INV)
-    inner_contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-
-    candidates = []
-    for cnt in inner_contours:
-        if cv2.pointPolygonTest(parent_contour, tuple(cnt[0][0]), False) >= 0:
-            area = cv2.contourArea(cnt)
-            if area >= min_area:
-                border = extract_border_points(cnt)
-                if border:
-                    candidates.append((area, border))
-    if not candidates:
-        return None
-    return max(candidates, key=lambda x: x[0])[1]
-
 def process_to_svg(image_bytes):
     data = extract_objects_from_bytes(image_bytes)
 
@@ -187,12 +167,25 @@ def process_to_svg(image_bytes):
                 svg.appendChild(polyline_r)
                 all_points.extend(shifted_red)
 
-            x, y, w, h = obj['bounding_box']
-            ref_area = w * h
-            min_area = 0.05 * ref_area
-            green_points = get_largest_inner_object(obj['mask'], data['gray'], min_area)
-            if green_points:
-                green_str = " ".join(f"{x},{y}" for (x, y) in green_points)
+            x0, y0, w0, h0 = obj['bounding_box']
+            ref_area = w0 * h0
+            mask = np.zeros((data['height'], data['width']), dtype=np.uint8)
+            cv2.drawContours(mask, [obj['mask']], -1, 255, thickness=cv2.FILLED)
+            sub = cv2.bitwise_and(data['gray'], mask)
+            _, thresh = cv2.threshold(sub, 127, 255, cv2.THRESH_BINARY_INV)
+            contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            best = None
+            best_area = 0
+            for cnt in contours:
+                x, y, w, h = cv2.boundingRect(cnt)
+                area = w * h
+                if area >= 0.05 * ref_area and area > best_area:
+                    border = extract_border_points(cnt)
+                    if border:
+                        best = border
+                        best_area = area
+            if best:
+                green_str = " ".join(f"{x},{y}" for (x, y) in best)
                 green_polyline = doc.createElement('polyline')
                 green_polyline.setAttribute('points', green_str)
                 green_polyline.setAttribute('fill', 'none')
@@ -200,7 +193,7 @@ def process_to_svg(image_bytes):
                 green_polyline.setAttribute('stroke-width', '1')
                 green_polyline.setAttribute('class', 'rank_0_inner')
                 svg.appendChild(green_polyline)
-                all_points.extend(green_points)
+                all_points.extend(best)
 
         all_points.extend(border_points)
         all_points.extend(red_points)
