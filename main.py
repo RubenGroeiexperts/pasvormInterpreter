@@ -75,7 +75,8 @@ def extract_objects_from_bytes(image_bytes):
     return {
         "objects": objects,
         "width": image_cv.shape[1],
-        "height": image_cv.shape[0]
+        "height": image_cv.shape[0],
+        "gray": gray
     }
 
 def generate_inner_contour(image_shape, contour, offset_distance=8):
@@ -90,6 +91,26 @@ def generate_inner_contour(image_shape, contour, offset_distance=8):
 
     best_contour = max(contours, key=len)
     return [(int(y), int(x)) for x, y in best_contour]
+
+def get_largest_inner_object(parent_contour, gray_image, min_area):
+    mask = np.zeros_like(gray_image)
+    cv2.drawContours(mask, [parent_contour], -1, 255, thickness=cv2.FILLED)
+
+    masked_gray = cv2.bitwise_and(gray_image, mask)
+    _, thresh = cv2.threshold(masked_gray, 127, 255, cv2.THRESH_BINARY_INV)
+    inner_contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+    candidates = []
+    for cnt in inner_contours:
+        if cv2.pointPolygonTest(parent_contour, tuple(cnt[0][0]), False) >= 0:
+            area = cv2.contourArea(cnt)
+            if area >= min_area:
+                border = extract_border_points(cnt)
+                if border:
+                    candidates.append((area, border))
+    if not candidates:
+        return None
+    return max(candidates, key=lambda x: x[0])[1]
 
 def process_to_svg(image_bytes):
     data = extract_objects_from_bytes(image_bytes)
@@ -120,7 +141,6 @@ def process_to_svg(image_bytes):
         if not border_points:
             continue
 
-        # BLACK outer line
         black_str = " ".join(f"{x},{y}" for (x, y) in border_points)
         black_polyline = doc.createElement('polyline')
         black_polyline.setAttribute('points', black_str)
@@ -130,24 +150,21 @@ def process_to_svg(image_bytes):
         black_polyline.setAttribute('class', f'rank_{rank}')
         svg.appendChild(black_polyline)
 
-        # RED inner line
         mask_shape = (data['height'], data['width'])
         red_points = generate_inner_contour(mask_shape, obj['mask'], offset_distance=8)
-        if not red_points:
-            continue
-        red_str = " ".join(f"{x},{y}" for (x, y) in red_points)
-        red_polyline = doc.createElement('polyline')
-        red_polyline.setAttribute('points', red_str)
-        red_polyline.setAttribute('fill', 'none')
-        red_polyline.setAttribute('stroke', 'red')
-        red_polyline.setAttribute('stroke-width', '1')
-        red_polyline.setAttribute('class', f'rank_{rank}')
-        svg.appendChild(red_polyline)
+        if red_points:
+            red_str = " ".join(f"{x},{y}" for (x, y) in red_points)
+            red_polyline = doc.createElement('polyline')
+            red_polyline.setAttribute('points', red_str)
+            red_polyline.setAttribute('fill', 'none')
+            red_polyline.setAttribute('stroke', 'red')
+            red_polyline.setAttribute('stroke-width', '1')
+            red_polyline.setAttribute('class', f'rank_{rank}')
+            svg.appendChild(red_polyline)
 
         if rank == 0:
             shifts = [(-15, -15, "rank_0_a"), (-30, -30, "rank_0_b")]
             for dx, dy, label in shifts:
-                # Shift black polyline
                 shifted_black = [(x + dx, y + dy) for (x, y) in border_points]
                 black_str = " ".join(f"{x},{y}" for (x, y) in shifted_black)
                 polyline_b = doc.createElement('polyline')
@@ -159,7 +176,6 @@ def process_to_svg(image_bytes):
                 svg.appendChild(polyline_b)
                 all_points.extend(shifted_black)
 
-                # Shift red polyline
                 shifted_red = [(x + dx, y + dy) for (x, y) in red_points]
                 red_str = " ".join(f"{x},{y}" for (x, y) in shifted_red)
                 polyline_r = doc.createElement('polyline')
@@ -171,10 +187,24 @@ def process_to_svg(image_bytes):
                 svg.appendChild(polyline_r)
                 all_points.extend(shifted_red)
 
+            x, y, w, h = obj['bounding_box']
+            ref_area = w * h
+            min_area = 0.05 * ref_area
+            green_points = get_largest_inner_object(obj['mask'], data['gray'], min_area)
+            if green_points:
+                green_str = " ".join(f"{x},{y}" for (x, y) in green_points)
+                green_polyline = doc.createElement('polyline')
+                green_polyline.setAttribute('points', green_str)
+                green_polyline.setAttribute('fill', 'none')
+                green_polyline.setAttribute('stroke', 'green')
+                green_polyline.setAttribute('stroke-width', '1')
+                green_polyline.setAttribute('class', 'rank_0_inner')
+                svg.appendChild(green_polyline)
+                all_points.extend(green_points)
+
         all_points.extend(border_points)
         all_points.extend(red_points)
 
-    # Expand canvas if needed
     all_x = [x for x, y in all_points]
     all_y = [y for x, y in all_points]
     new_width = max(data['width'], max(all_x, default=0) + 1)
