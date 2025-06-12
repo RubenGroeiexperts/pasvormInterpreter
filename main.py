@@ -119,8 +119,9 @@ def process_to_svg(image_bytes):
         ranked_objects.append((dist, obj))
     ranked_objects.sort(key=lambda t: t[0])
     all_points = []
-    rank_0_polylines = []
+    rank_0_a_polylines = []
     rank_0_b_polylines = []
+    rank_0_polylines = []
     for rank, (_, obj) in enumerate(ranked_objects):
         border_points = clean_polyline(obj['border_points'])
         if not border_points:
@@ -140,11 +141,6 @@ def process_to_svg(image_bytes):
                 polyline_b.setAttribute('stroke', 'black')
                 polyline_b.setAttribute('stroke-width', '1')
                 polyline_b.setAttribute('class', label)
-                if label == "rank_0_b":
-                    rank_0_polylines.append(polyline_b)
-                else:
-                    svg.appendChild(polyline_b)
-                all_points.extend(shifted_black)
                 shifted_red = clean_polyline([(x + dx, y + dy) for (x, y) in red_points])
                 red_str = " ".join(f"{x},{y}" for (x, y) in shifted_red)
                 polyline_r = doc.createElement('polyline')
@@ -153,10 +149,11 @@ def process_to_svg(image_bytes):
                 polyline_r.setAttribute('stroke', 'red')
                 polyline_r.setAttribute('stroke-width', '1')
                 polyline_r.setAttribute('class', label)
-                if label == "rank_0_b":
-                    rank_0_polylines.append(polyline_r)
-                else:
-                    svg.appendChild(polyline_r)
+                if label == "rank_0_a":
+                    rank_0_a_polylines.extend([polyline_b, polyline_r])
+                elif label == "rank_0_b":
+                    rank_0_b_polylines.extend([polyline_b, polyline_r])
+                all_points.extend(shifted_black)
                 all_points.extend(shifted_red)
             black_str = " ".join(f"{x},{y}" for (x, y) in border_points)
             red_str = " ".join(f"{x},{y}" for (x, y) in red_points)
@@ -172,8 +169,7 @@ def process_to_svg(image_bytes):
             polyline_red.setAttribute('stroke', 'red')
             polyline_red.setAttribute('stroke-width', '1')
             polyline_red.setAttribute('class', 'rank_0')
-            rank_0_b_polylines.append(polyline_black)
-            rank_0_b_polylines.append(polyline_red)
+            rank_0_polylines.extend([polyline_black, polyline_red])
         else:
             black_str = " ".join(f"{x},{y}" for (x, y) in border_points)
             red_str = " ".join(f"{x},{y}" for (x, y) in red_points)
@@ -193,10 +189,14 @@ def process_to_svg(image_bytes):
             svg.appendChild(red_polyline)
         all_points.extend(border_points)
         all_points.extend(red_points)
-    for poly in rank_0_polylines:
-        svg.appendChild(poly)
+
     for poly in rank_0_b_polylines:
         svg.appendChild(poly)
+    for poly in rank_0_a_polylines:
+        svg.appendChild(poly)
+    for poly in rank_0_polylines:
+        svg.appendChild(poly)
+
     all_x = [x for x, y in all_points]
     all_y = [y for x, y in all_points]
     new_width = max(data['width'], max(all_x, default=0) + 1)
