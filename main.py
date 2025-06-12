@@ -91,18 +91,6 @@ def generate_inner_contour(image_shape, contour, offset_distance=8):
     best_contour = max(contours, key=len)
     return [(int(y), int(x)) for x, y in best_contour]
 
-def clean_polyline_points(points):
-    """Remove consecutive duplicates and ensure closure."""
-    if not points:
-        return points
-    cleaned = [points[0]]
-    for pt in points[1:]:
-        if pt != cleaned[-1]:
-            cleaned.append(pt)
-    if cleaned[0] != cleaned[-1]:
-        cleaned.append(cleaned[0])
-    return cleaned
-
 def process_to_svg(image_bytes):
     data = extract_objects_from_bytes(image_bytes)
 
@@ -133,8 +121,7 @@ def process_to_svg(image_bytes):
             continue
 
         # BLACK outer line
-        cleaned_black = clean_polyline_points(border_points)
-        black_str = " ".join(f"{x},{y}" for (x, y) in cleaned_black)
+        black_str = " ".join(f"{x},{y}" for (x, y) in border_points)
         black_polyline = doc.createElement('polyline')
         black_polyline.setAttribute('points', black_str)
         black_polyline.setAttribute('fill', 'none')
@@ -148,8 +135,7 @@ def process_to_svg(image_bytes):
         red_points = generate_inner_contour(mask_shape, obj['mask'], offset_distance=8)
         if not red_points:
             continue
-        cleaned_red = clean_polyline_points(red_points)
-        red_str = " ".join(f"{x},{y}" for (x, y) in cleaned_red)
+        red_str = " ".join(f"{x},{y}" for (x, y) in red_points)
         red_polyline = doc.createElement('polyline')
         red_polyline.setAttribute('points', red_str)
         red_polyline.setAttribute('fill', 'none')
@@ -163,8 +149,7 @@ def process_to_svg(image_bytes):
             for dx, dy, label in shifts:
                 # Shift black polyline
                 shifted_black = [(x + dx, y + dy) for (x, y) in border_points]
-                cleaned_shifted_black = clean_polyline_points(shifted_black)
-                black_str = " ".join(f"{x},{y}" for (x, y) in cleaned_shifted_black)
+                black_str = " ".join(f"{x},{y}" for (x, y) in shifted_black)
                 polyline_b = doc.createElement('polyline')
                 polyline_b.setAttribute('points', black_str)
                 polyline_b.setAttribute('fill', 'none')
@@ -172,12 +157,11 @@ def process_to_svg(image_bytes):
                 polyline_b.setAttribute('stroke-width', '1')
                 polyline_b.setAttribute('class', label)
                 svg.appendChild(polyline_b)
-                all_points.extend(cleaned_shifted_black)
+                all_points.extend(shifted_black)
 
                 # Shift red polyline
                 shifted_red = [(x + dx, y + dy) for (x, y) in red_points]
-                cleaned_shifted_red = clean_polyline_points(shifted_red)
-                red_str = " ".join(f"{x},{y}" for (x, y) in cleaned_shifted_red)
+                red_str = " ".join(f"{x},{y}" for (x, y) in shifted_red)
                 polyline_r = doc.createElement('polyline')
                 polyline_r.setAttribute('points', red_str)
                 polyline_r.setAttribute('fill', 'none')
@@ -185,10 +169,10 @@ def process_to_svg(image_bytes):
                 polyline_r.setAttribute('stroke-width', '1')
                 polyline_r.setAttribute('class', label)
                 svg.appendChild(polyline_r)
-                all_points.extend(cleaned_shifted_red)
+                all_points.extend(shifted_red)
 
-        all_points.extend(cleaned_black)
-        all_points.extend(cleaned_red)
+        all_points.extend(border_points)
+        all_points.extend(red_points)
 
     # Expand canvas if needed
     all_x = [x for x, y in all_points]
