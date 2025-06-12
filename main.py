@@ -9,6 +9,7 @@ from io import BytesIO
 from xml.dom.minidom import Document
 from skimage import measure
 from math import hypot
+from typing import List, Tuple
 
 app = FastAPI()
 
@@ -25,9 +26,7 @@ async def process_image(request: Request):
     data = await request.json()
     image_url = data["image_url"]
     image_data = requests.get(image_url).content
-
     svg_data = process_to_svg(image_data)
-
     return Response(content=svg_data, media_type="image/svg+xml")
 
 def remove_small_objects(image, min_area=500):
@@ -81,26 +80,34 @@ def extract_objects_from_bytes(image_bytes):
 def generate_inner_contour(image_shape, contour, offset_distance=8):
     mask = np.zeros(image_shape, dtype=np.uint8)
     cv2.drawContours(mask, [contour], -1, 255, thickness=cv2.FILLED)
-
     dist_transform = cv2.distanceTransform(mask, cv2.DIST_L2, 5)
     contours = measure.find_contours(dist_transform, level=offset_distance)
-
     if not contours:
         return []
-
     best_contour = max(contours, key=len)
     return [(int(y), int(x)) for x, y in best_contour]
 
+def remove_consecutive_duplicates(points: List[Tuple[int, int]]) -> List[Tuple[int, int]]:
+    return [pt for i, pt in enumerate(points) if i == 0 or pt != points[i - 1]]
+
+def remove_looping_tail(points: List[Tuple[int, int]]) -> List[Tuple[int, int]]:
+    for i in range(1, len(points)):
+        if points[i:] == points[:len(points)-i]:
+            return points[:i]
+    return points
+
+def clean_polyline(points: List[Tuple[int, int]]) -> List[Tuple[int, int]]:
+    points = remove_consecutive_duplicates(points)
+    return remove_looping_tail(points)
+
 def process_to_svg(image_bytes):
     data = extract_objects_from_bytes(image_bytes)
-
     doc = Document()
     svg = doc.createElement('svg')
     svg.setAttribute('width', f"{data['width']}")
     svg.setAttribute('height', f"{data['height']}")
     svg.setAttribute('xmlns', "http://www.w3.org/2000/svg")
     doc.appendChild(svg)
-
     ref_x = data['width'] * 0.25
     ref_y = 0
     ranked_objects = []
@@ -110,17 +117,12 @@ def process_to_svg(image_bytes):
         cy = y + h / 2
         dist = hypot(cx - ref_x, cy - ref_y)
         ranked_objects.append((dist, obj))
-
     ranked_objects.sort(key=lambda t: t[0])
-
     all_points = []
-
     for rank, (_, obj) in enumerate(ranked_objects):
-        border_points = obj['border_points']
+        border_points = clean_polyline(obj['border_points'])
         if not border_points:
             continue
-
-        # BLACK outer line
         black_str = " ".join(f"{x},{y}" for (x, y) in border_points)
         black_polyline = doc.createElement('polyline')
         black_polyline.setAttribute('points', black_str)
@@ -129,10 +131,8 @@ def process_to_svg(image_bytes):
         black_polyline.setAttribute('stroke-width', '1')
         black_polyline.setAttribute('class', f'rank_{rank}')
         svg.appendChild(black_polyline)
-
-        # RED inner line
         mask_shape = (data['height'], data['width'])
-        red_points = generate_inner_contour(mask_shape, obj['mask'], offset_distance=8)
+        red_points = clean_polyline(generate_inner_contour(mask_shape, obj['mask'], offset_distance=8))
         if not red_points:
             continue
         red_str = " ".join(f"{x},{y}" for (x, y) in red_points)
@@ -143,12 +143,10 @@ def process_to_svg(image_bytes):
         red_polyline.setAttribute('stroke-width', '1')
         red_polyline.setAttribute('class', f'rank_{rank}')
         svg.appendChild(red_polyline)
-
         if rank == 0:
             shifts = [(-15, -15, "rank_0_a"), (-30, -30, "rank_0_b")]
             for dx, dy, label in shifts:
-                # Shift black polyline
-                shifted_black = [(x + dx, y + dy) for (x, y) in border_points]
+                shifted_black = clean_polyline([(x + dx, y + dy) for (x, y) in border_points])
                 black_str = " ".join(f"{x},{y}" for (x, y) in shifted_black)
                 polyline_b = doc.createElement('polyline')
                 polyline_b.setAttribute('points', black_str)
@@ -158,9 +156,7 @@ def process_to_svg(image_bytes):
                 polyline_b.setAttribute('class', label)
                 svg.appendChild(polyline_b)
                 all_points.extend(shifted_black)
-
-                # Shift red polyline
-                shifted_red = [(x + dx, y + dy) for (x, y) in red_points]
+                shifted_red = clean_polyline([(x + dx, y + dy) for (x, y) in red_points])
                 red_str = " ".join(f"{x},{y}" for (x, y) in shifted_red)
                 polyline_r = doc.createElement('polyline')
                 polyline_r.setAttribute('points', red_str)
@@ -170,16 +166,12 @@ def process_to_svg(image_bytes):
                 polyline_r.setAttribute('class', label)
                 svg.appendChild(polyline_r)
                 all_points.extend(shifted_red)
-
         all_points.extend(border_points)
         all_points.extend(red_points)
-
-    # Expand canvas if needed
     all_x = [x for x, y in all_points]
     all_y = [y for x, y in all_points]
     new_width = max(data['width'], max(all_x, default=0) + 1)
     new_height = max(data['height'], max(all_y, default=0) + 1)
     svg.setAttribute('width', str(new_width))
     svg.setAttribute('height', str(new_height))
-
     return doc.toxml()
