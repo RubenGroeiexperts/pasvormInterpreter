@@ -52,21 +52,6 @@ def extract_border_points(contour, min_area_threshold=500):
         border_points = border_points * multiplier + border_points[:extra]
     return border_points
 
-def is_visually_binary(image_np, sample_size=500, margin=15, max_mid_fraction=0.01):
-    gray = cv2.cvtColor(image_np, cv2.COLOR_RGB2GRAY)
-    flat = gray.flatten()
-    if len(flat) > sample_size:
-        indices = np.random.choice(len(flat), sample_size, replace=False)
-        flat = flat[indices]
-    blacks = np.sum(flat <= margin)
-    whites = np.sum(flat >= 255 - margin)
-    mids = len(flat) - blacks - whites
-    mid_fraction = mids / len(flat)
-    print(f"Mid-tone pixel fraction: {mid_fraction:.4f}")
-    is_binary = mid_fraction < max_mid_fraction
-    print("Image is visually binary." if is_binary else "Image is NOT visually binary.")
-    return is_binary
-
 def extract_objects_from_bytes(image_bytes):
     image = Image.open(BytesIO(image_bytes)).convert("RGBA")
     white_bg = Image.new("RGB", image.size, (255, 255, 255))
@@ -75,17 +60,9 @@ def extract_objects_from_bytes(image_bytes):
 
     pad_size = 32
     image_np_padded = cv2.copyMakeBorder(
-        image_np,
-        pad_size,
-        pad_size,
-        pad_size,
-        pad_size,
-        cv2.BORDER_CONSTANT,
-        value=[255, 255, 255]
+        image_np, pad_size, pad_size, pad_size, pad_size,
+        cv2.BORDER_CONSTANT, value=[255, 255, 255]
     )
-
-    if not is_visually_binary(image_np_padded):
-        return {"abort": True}
 
     image_cv = cv2.cvtColor(image_np_padded, cv2.COLOR_RGB2BGR)
     gray = cv2.cvtColor(image_cv, cv2.COLOR_BGR2GRAY)
@@ -107,8 +84,7 @@ def extract_objects_from_bytes(image_bytes):
         "objects": objects,
         "width": image_cv.shape[1],
         "height": image_cv.shape[0],
-        "pad_size": pad_size,
-        "abort": False
+        "pad_size": pad_size
     }
 
 def generate_inner_contour(image_shape, contour, offset_distance=8):
@@ -136,16 +112,24 @@ def clean_polyline(points: List[Tuple[int, int]]) -> List[Tuple[int, int]]:
 
 def process_to_svg(image_bytes):
     data = extract_objects_from_bytes(image_bytes)
-    if data.get("abort"):
+    pad = data.get("pad_size", 0)
+    total_image_area = (data['width'] - 2 * pad) * (data['height'] - 2 * pad)
+
+    num_objects = len(data['objects'])
+    total_bbox_area = sum(w * h for (x, y, w, h) in (obj["bounding_box"] for obj in data['objects']))
+    bbox_area_ratio = total_bbox_area / total_image_area if total_image_area > 0 else 0
+
+    print(f"Found {num_objects} objects, bounding rect area ratio: {bbox_area_ratio:.2%}")
+
+    if not (2 <= num_objects <= 9) or bbox_area_ratio < 0.4:
         doc = Document()
         svg = doc.createElement('svg')
-        svg.setAttribute('width', "0")
-        svg.setAttribute('height', "0")
         svg.setAttribute('xmlns', "http://www.w3.org/2000/svg")
+        svg.setAttribute('width', '0')
+        svg.setAttribute('height', '0')
         doc.appendChild(svg)
         return doc.toxml()
 
-    pad = data.get("pad_size", 0)
     doc = Document()
     svg = doc.createElement('svg')
     svg.setAttribute('xmlns', "http://www.w3.org/2000/svg")
@@ -176,24 +160,24 @@ def process_to_svg(image_bytes):
             shifts = [(-15, -15, "rank_0_a"), (-30, -30, "rank_0_b")]
             for dx, dy, label in shifts:
                 shifted_black = clean_polyline([(x + dx, y + dy) for (x, y) in border_points])
+                shifted_red = clean_polyline([(x + dx, y + dy) for (x, y) in red_points])
                 black_str = " ".join(f"{x},{y}" for (x, y) in shifted_black)
+                red_str = " ".join(f"{x},{y}" for (x, y) in shifted_red)
                 polyline_b = doc.createElement('polyline')
                 polyline_b.setAttribute('points', black_str)
-                polyline_b.setAttribute('fill', 'none')
                 polyline_b.setAttribute('stroke', 'black')
+                polyline_b.setAttribute('fill', 'none')
                 polyline_b.setAttribute('stroke-width', '1')
                 polyline_b.setAttribute('class', label)
-                shifted_red = clean_polyline([(x + dx, y + dy) for (x, y) in red_points])
-                red_str = " ".join(f"{x},{y}" for (x, y) in shifted_red)
                 polyline_r = doc.createElement('polyline')
                 polyline_r.setAttribute('points', red_str)
-                polyline_r.setAttribute('fill', 'none')
                 polyline_r.setAttribute('stroke', 'red')
+                polyline_r.setAttribute('fill', 'none')
                 polyline_r.setAttribute('stroke-width', '1')
                 polyline_r.setAttribute('class', label)
                 if label == "rank_0_a":
                     rank_0_a_polylines.extend([polyline_b, polyline_r])
-                elif label == "rank_0_b":
+                else:
                     rank_0_b_polylines.extend([polyline_b, polyline_r])
                 all_points.extend(shifted_black)
                 all_points.extend(shifted_red)
@@ -221,16 +205,16 @@ def process_to_svg(image_bytes):
             black_polyline.setAttribute('stroke', 'black')
             black_polyline.setAttribute('stroke-width', '1')
             black_polyline.setAttribute('class', f'rank_{rank}')
-            svg.appendChild(black_polyline)
             red_polyline = doc.createElement('polyline')
             red_polyline.setAttribute('points', red_str)
             red_polyline.setAttribute('fill', 'none')
             red_polyline.setAttribute('stroke', 'red')
             red_polyline.setAttribute('stroke-width', '1')
             red_polyline.setAttribute('class', f'rank_{rank}')
+            svg.appendChild(black_polyline)
             svg.appendChild(red_polyline)
-        all_points.extend(border_points)
-        all_points.extend(red_points)
+            all_points.extend(border_points)
+            all_points.extend(red_points)
 
     for poly in rank_0_b_polylines + rank_0_a_polylines + rank_0_polylines:
         svg.appendChild(poly)
@@ -240,21 +224,16 @@ def process_to_svg(image_bytes):
     shift_x = -min_x if min_x < 0 else 0
     shift_y = -min_y if min_y < 0 else 0
 
-    def update_polyline_coords(polyline):
-        coords = polyline.getAttribute('points').strip().split()
+    for poly in svg.getElementsByTagName('polyline'):
+        coords = poly.getAttribute('points').split()
         shifted = []
         for pt in coords:
             x, y = map(int, pt.split(','))
             shifted.append(f"{x + shift_x},{y + shift_y}")
-        polyline.setAttribute('points', " ".join(shifted))
-
-    for poly in svg.getElementsByTagName('polyline'):
-        update_polyline_coords(poly)
+        poly.setAttribute('points', " ".join(shifted))
 
     all_x = [x + shift_x for x, _ in all_points]
     all_y = [y + shift_y for _, y in all_points]
-    new_width = max(all_x, default=0) + 1
-    new_height = max(all_y, default=0) + 1
-    svg.setAttribute('width', str(new_width))
-    svg.setAttribute('height', str(new_height))
+    svg.setAttribute('width', str(max(all_x, default=0) + 1))
+    svg.setAttribute('height', str(max(all_y, default=0) + 1))
     return doc.toxml()
