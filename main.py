@@ -72,10 +72,11 @@ def extract_objects_from_bytes(image_bytes):
     h, w, _ = image_np_padded.shape
     sample_indices = np.random.choice(h * w, 500, replace=False)
     pixels = image_np_padded.reshape(-1, 3)[sample_indices]
-    non_bw = np.sum(~((pixels == [0, 0, 0]).all(axis=1) | (pixels == [255, 255, 255]).all(axis=1)))
-    print(f"Non-binary pixels in sample: {non_bw}")
+    unique_colors = np.unique(pixels, axis=0)
+    num_unique_colors = len(unique_colors)
+    print(f"Unique pixel colors in sample: {num_unique_colors}")
 
-    if non_bw >= 50:
+    if num_unique_colors > 2:
         return {"abort": True}
 
     image_cv = cv2.cvtColor(image_np_padded, cv2.COLOR_RGB2BGR)
