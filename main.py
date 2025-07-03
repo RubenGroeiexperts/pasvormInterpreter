@@ -120,8 +120,6 @@ def process_to_svg(image_bytes):
     pad = data.get("pad_size", 0)
     doc = Document()
     svg = doc.createElement('svg')
-    svg.setAttribute('width', f"{data['width'] - 2 * pad}")
-    svg.setAttribute('height', f"{data['height'] - 2 * pad}")
     svg.setAttribute('xmlns', "http://www.w3.org/2000/svg")
     doc.appendChild(svg)
     ref_x = (data['width'] - 2 * pad) * 0.25
@@ -206,17 +204,29 @@ def process_to_svg(image_bytes):
         all_points.extend(border_points)
         all_points.extend(red_points)
 
-    for poly in rank_0_b_polylines:
-        svg.appendChild(poly)
-    for poly in rank_0_a_polylines:
-        svg.appendChild(poly)
-    for poly in rank_0_polylines:
+    for poly in rank_0_b_polylines + rank_0_a_polylines + rank_0_polylines:
         svg.appendChild(poly)
 
-    all_x = [x for x, y in all_points]
-    all_y = [y for x, y in all_points]
-    new_width = max(data['width'] - 2 * pad, max(all_x, default=0) + 1)
-    new_height = max(data['height'] - 2 * pad, max(all_y, default=0) + 1)
+    min_x = min((x for x, _ in all_points), default=0)
+    min_y = min((y for _, y in all_points), default=0)
+    shift_x = -min_x if min_x < 0 else 0
+    shift_y = -min_y if min_y < 0 else 0
+
+    def update_polyline_coords(polyline):
+        coords = polyline.getAttribute('points').strip().split()
+        shifted = []
+        for pt in coords:
+            x, y = map(int, pt.split(','))
+            shifted.append(f"{x + shift_x},{y + shift_y}")
+        polyline.setAttribute('points', " ".join(shifted))
+
+    for poly in svg.getElementsByTagName('polyline'):
+        update_polyline_coords(poly)
+
+    all_x = [x + shift_x for x, _ in all_points]
+    all_y = [y + shift_y for _, y in all_points]
+    new_width = max(all_x, default=0) + 1
+    new_height = max(all_y, default=0) + 1
     svg.setAttribute('width', str(new_width))
     svg.setAttribute('height', str(new_height))
     return doc.toxml()
