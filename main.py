@@ -69,6 +69,14 @@ def extract_objects_from_bytes(image_bytes):
         value=[255, 255, 255]
     )
 
+    h, w, _ = image_np_padded.shape
+    sample_indices = np.random.choice(h * w, 500, replace=False)
+    pixels = image_np_padded.reshape(-1, 3)[sample_indices]
+    non_bw = np.sum(~((pixels == [0, 0, 0]).all(axis=1) | (pixels == [255, 255, 255]).all(axis=1)))
+
+    if non_bw >= 50:
+        return {"abort": True}
+
     image_cv = cv2.cvtColor(image_np_padded, cv2.COLOR_RGB2BGR)
     gray = cv2.cvtColor(image_cv, cv2.COLOR_BGR2GRAY)
     _, thresh = cv2.threshold(gray, 127, 255, cv2.THRESH_BINARY_INV)
@@ -89,7 +97,8 @@ def extract_objects_from_bytes(image_bytes):
         "objects": objects,
         "width": image_cv.shape[1],
         "height": image_cv.shape[0],
-        "pad_size": pad_size
+        "pad_size": pad_size,
+        "abort": False
     }
 
 def generate_inner_contour(image_shape, contour, offset_distance=8):
@@ -117,6 +126,15 @@ def clean_polyline(points: List[Tuple[int, int]]) -> List[Tuple[int, int]]:
 
 def process_to_svg(image_bytes):
     data = extract_objects_from_bytes(image_bytes)
+    if data.get("abort"):
+        doc = Document()
+        svg = doc.createElement('svg')
+        svg.setAttribute('width', "0")
+        svg.setAttribute('height', "0")
+        svg.setAttribute('xmlns', "http://www.w3.org/2000/svg")
+        doc.appendChild(svg)
+        return doc.toxml()
+
     pad = data.get("pad_size", 0)
     doc = Document()
     svg = doc.createElement('svg')
