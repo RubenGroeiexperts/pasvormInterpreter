@@ -21,6 +21,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+@app.get("/")
+def root():
+    return {"status": "ok"}
+
+
 @app.post("/process-image")
 async def process_image(request: Request):
     data = await request.json()
