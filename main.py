@@ -73,6 +73,7 @@ def extract_objects_from_bytes(image_bytes):
     sample_indices = np.random.choice(h * w, 500, replace=False)
     pixels = image_np_padded.reshape(-1, 3)[sample_indices]
     non_bw = np.sum(~((pixels == [0, 0, 0]).all(axis=1) | (pixels == [255, 255, 255]).all(axis=1)))
+    print(f"Non-binary pixels in sample: {non_bw}")
 
     if non_bw >= 50:
         return {"abort": True}
