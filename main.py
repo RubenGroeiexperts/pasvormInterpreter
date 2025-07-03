@@ -57,11 +57,24 @@ def extract_objects_from_bytes(image_bytes):
     white_bg = Image.new("RGB", image.size, (255, 255, 255))
     white_bg.paste(image, (0, 0), image)
     image_np = np.array(white_bg)
-    image_cv = cv2.cvtColor(image_np, cv2.COLOR_RGB2BGR)
+
+    pad_size = 32
+    image_np_padded = cv2.copyMakeBorder(
+        image_np,
+        pad_size,
+        pad_size,
+        pad_size,
+        pad_size,
+        cv2.BORDER_CONSTANT,
+        value=[255, 255, 255]
+    )
+
+    image_cv = cv2.cvtColor(image_np_padded, cv2.COLOR_RGB2BGR)
     gray = cv2.cvtColor(image_cv, cv2.COLOR_BGR2GRAY)
     _, thresh = cv2.threshold(gray, 127, 255, cv2.THRESH_BINARY_INV)
     cleaned = remove_small_objects(thresh, min_area=500)
     contours, _ = cv2.findContours(cleaned, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
     objects = []
     for cnt in contours:
         x, y, w, h = cv2.boundingRect(cnt)
@@ -71,10 +84,12 @@ def extract_objects_from_bytes(image_bytes):
             "mask": cnt,
             "border_points": border_points
         })
+
     return {
         "objects": objects,
         "width": image_cv.shape[1],
-        "height": image_cv.shape[0]
+        "height": image_cv.shape[0],
+        "pad_size": pad_size
     }
 
 def generate_inner_contour(image_shape, contour, offset_distance=8):
@@ -102,20 +117,21 @@ def clean_polyline(points: List[Tuple[int, int]]) -> List[Tuple[int, int]]:
 
 def process_to_svg(image_bytes):
     data = extract_objects_from_bytes(image_bytes)
+    pad = data.get("pad_size", 0)
     doc = Document()
     svg = doc.createElement('svg')
-    svg.setAttribute('width', f"{data['width']}")
-    svg.setAttribute('height', f"{data['height']}")
+    svg.setAttribute('width', f"{data['width'] - 2 * pad}")
+    svg.setAttribute('height', f"{data['height'] - 2 * pad}")
     svg.setAttribute('xmlns', "http://www.w3.org/2000/svg")
     doc.appendChild(svg)
-    ref_x = data['width'] * 0.25
+    ref_x = (data['width'] - 2 * pad) * 0.25
     ref_y = 0
     ranked_objects = []
     for obj in data['objects']:
         x, y, w, h = obj['bounding_box']
         cx = x + w / 2
         cy = y + h / 2
-        dist = hypot(cx - ref_x, cy - ref_y)
+        dist = hypot(cx - pad - ref_x, cy - pad - ref_y)
         ranked_objects.append((dist, obj))
     ranked_objects.sort(key=lambda t: t[0])
     all_points = []
@@ -123,11 +139,11 @@ def process_to_svg(image_bytes):
     rank_0_b_polylines = []
     rank_0_polylines = []
     for rank, (_, obj) in enumerate(ranked_objects):
-        border_points = clean_polyline(obj['border_points'])
+        border_points = clean_polyline([(x - pad, y - pad) for (x, y) in obj['border_points']])
         if not border_points:
             continue
         mask_shape = (data['height'], data['width'])
-        red_points = clean_polyline(generate_inner_contour(mask_shape, obj['mask'], offset_distance=8))
+        red_points = clean_polyline([(x - pad, y - pad) for (x, y) in generate_inner_contour(mask_shape, obj['mask'], offset_distance=8)])
         if not red_points:
             continue
         if rank == 0:
@@ -199,8 +215,8 @@ def process_to_svg(image_bytes):
 
     all_x = [x for x, y in all_points]
     all_y = [y for x, y in all_points]
-    new_width = max(data['width'], max(all_x, default=0) + 1)
-    new_height = max(data['height'], max(all_y, default=0) + 1)
+    new_width = max(data['width'] - 2 * pad, max(all_x, default=0) + 1)
+    new_height = max(data['height'] - 2 * pad, max(all_y, default=0) + 1)
     svg.setAttribute('width', str(new_width))
     svg.setAttribute('height', str(new_height))
     return doc.toxml()
