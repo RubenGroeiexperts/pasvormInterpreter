@@ -52,6 +52,21 @@ def extract_border_points(contour, min_area_threshold=500):
         border_points = border_points * multiplier + border_points[:extra]
     return border_points
 
+def is_visually_binary(image_np, sample_size=500, margin=15, max_mid_fraction=0.01):
+    gray = cv2.cvtColor(image_np, cv2.COLOR_RGB2GRAY)
+    flat = gray.flatten()
+    if len(flat) > sample_size:
+        indices = np.random.choice(len(flat), sample_size, replace=False)
+        flat = flat[indices]
+    blacks = np.sum(flat <= margin)
+    whites = np.sum(flat >= 255 - margin)
+    mids = len(flat) - blacks - whites
+    mid_fraction = mids / len(flat)
+    print(f"Mid-tone pixel fraction: {mid_fraction:.4f}")
+    is_binary = mid_fraction < max_mid_fraction
+    print("Image is visually binary." if is_binary else "Image is NOT visually binary.")
+    return is_binary
+
 def extract_objects_from_bytes(image_bytes):
     image = Image.open(BytesIO(image_bytes)).convert("RGBA")
     white_bg = Image.new("RGB", image.size, (255, 255, 255))
@@ -69,14 +84,7 @@ def extract_objects_from_bytes(image_bytes):
         value=[255, 255, 255]
     )
 
-    h, w, _ = image_np_padded.shape
-    sample_indices = np.random.choice(h * w, 500, replace=False)
-    pixels = image_np_padded.reshape(-1, 3)[sample_indices]
-    unique_colors = np.unique(pixels, axis=0)
-    num_unique_colors = len(unique_colors)
-    print(f"Unique pixel colors in sample: {num_unique_colors}")
-
-    if num_unique_colors > 2:
+    if not is_visually_binary(image_np_padded):
         return {"abort": True}
 
     image_cv = cv2.cvtColor(image_np_padded, cv2.COLOR_RGB2BGR)
