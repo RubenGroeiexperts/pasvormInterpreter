@@ -237,3 +237,10 @@ def process_to_svg(image_bytes):
     svg.setAttribute('width', str(max(all_x, default=0) + 1))
     svg.setAttribute('height', str(max(all_y, default=0) + 1))
     return doc.toxml()
+
+if __name__ == "__main__":
+    import os
+    import uvicorn
+
+    port = int(os.environ.get("PORT", 10000))
+    uvicorn.run(app, host="0.0.0.0", port=port)
