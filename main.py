@@ -121,7 +121,7 @@ def process_to_svg(image_bytes):
 
     print(f"Found {num_objects} objects, bounding rect area ratio: {bbox_area_ratio:.2%}")
 
-    if not (2 <= num_objects <= 9) or bbox_area_ratio < 0.4:
+    if not (3 <= num_objects <= 9) or bbox_area_ratio < 0.4:
         doc = Document()
         svg = doc.createElement('svg')
         svg.setAttribute('xmlns', "http://www.w3.org/2000/svg")
